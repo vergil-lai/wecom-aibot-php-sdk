@@ -7,15 +7,15 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 语音内容
  */
-class VoiceContent
+final class VoiceContent
 {
     public function __construct(
         public string $mediaId,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
-        return new self(
+        return new static(
             mediaId: $data['media_id'] ?? '',
         );
     }

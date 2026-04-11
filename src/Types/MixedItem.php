@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 图文混排项
  */
-class MixedItem
+final class MixedItem
 {
     public function __construct(
         public string $msgType,
@@ -15,7 +15,7 @@ class MixedItem
         public ?ImageContent $image = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $msgType = $data['msgtype'] ?? 'text';
         $text = null;
@@ -27,7 +27,7 @@ class MixedItem
             $image = ImageContent::fromArray($data['image']);
         }
 
-        return new self(
+        return new static(
             msgType: $msgType,
             text: $text,
             image: $image,

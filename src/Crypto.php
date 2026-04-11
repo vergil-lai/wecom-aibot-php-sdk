@@ -18,11 +18,11 @@ class Crypto
      */
     public static function decryptFile(string $encryptedData, string $aesKey): string
     {
-        if ($encryptedData === '' || $encryptedData === null) {
+        if ($encryptedData === '') {
             throw new \InvalidArgumentException('decryptFile: encryptedData is empty or not provided');
         }
 
-        if ($aesKey === '' || $aesKey === null) {
+        if ($aesKey === '') {
             throw new \InvalidArgumentException('decryptFile: aesKey must be a non-empty string');
         }
 
@@ -65,7 +65,7 @@ class Crypto
     /**
      * 移除 PKCS#7 填充
      *
-     * @param string $data解密后的数据
+     * @param string $data 解密后的数据
      * @return string 去除 padding 后的数据
      */
     private static function unpad(string $data): string

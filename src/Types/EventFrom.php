@@ -7,16 +7,16 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 事件发送者信息
  */
-class EventFrom
+final class EventFrom
 {
     public function __construct(
         public string $userId,
         public ?string $corpid = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
-        return new self(
+        return new static(
             userId: $data['userid'] ?? '',
             corpid: $data['corpid'] ?? null,
         );

@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * WebSocket 帧结构
  */
-readonly class WsFrame
+final readonly class WsFrame
 {
     public function __construct(
         public ?string $cmd,
@@ -17,10 +17,10 @@ readonly class WsFrame
         public ?string $errmsg = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $headers = WsFrameHeaders::fromArray($data['headers'] ?? []);
-        return new self(
+        return new static(
             cmd: $data['cmd'] ?? null,
             headers: $headers,
             body: $data['body'] ?? null,

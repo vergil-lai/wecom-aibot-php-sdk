@@ -7,18 +7,18 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * WebSocket 帧头
  */
-readonly class WsFrameHeaders
+final readonly class WsFrameHeaders
 {
     public function __construct(
         public string $reqId,
         public array $extra = [],
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $reqId = $data['req_id'] ?? '';
         $extra = array_diff_key($data, ['req_id' => true]);
-        return new self($reqId, $extra);
+        return new static($reqId, $extra);
     }
 
     public function toArray(): array

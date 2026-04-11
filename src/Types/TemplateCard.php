@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 模板卡片结构
  */
-class TemplateCard
+final class TemplateCard
 {
     public function __construct(
         public TemplateCardType $cardType,
@@ -42,9 +42,9 @@ class TemplateCard
      * 从企业微信 API 的 JSON 格式数组创建 TemplateCard 实例
      * 自动将蛇形命名转换为驼峰命名
      */
-    public static function fromApiArray(array $data): self
+    public static function fromApiArray(array $data): static
     {
-        return new self(
+        return new static(
             cardType: TemplateCardType::from($data['card_type'] ?? 'text_notice'),
             source: $data['source'] ?? [],
             actionMenu: $data['action_menu'] ?? [],

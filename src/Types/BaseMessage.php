@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 基础消息结构
  */
-class BaseMessage
+abstract class BaseMessage
 {
     public function __construct(
         public string $msgId,
@@ -21,7 +21,7 @@ class BaseMessage
         public ?QuoteContent $quote = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $from = null;
         if (isset($data['from'])) {
@@ -33,7 +33,7 @@ class BaseMessage
             $quote = QuoteContent::fromArray($data['quote']);
         }
 
-        return new self(
+        return new static(
             msgId: $data['msgid'] ?? '',
             aibotId: $data['aibotid'] ?? '',
             chatId: $data['chatid'] ?? null,

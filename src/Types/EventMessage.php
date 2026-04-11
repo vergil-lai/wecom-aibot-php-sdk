@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 事件消息
  */
-class EventMessage
+final class EventMessage
 {
     public function __construct(
         public string $msgId,
@@ -19,7 +19,7 @@ class EventMessage
         public ?EventContent $event = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $from = null;
         if (isset($data['from'])) {
@@ -31,7 +31,7 @@ class EventMessage
             $event = EventContent::fromArray($data['event']);
         }
 
-        return new self(
+        return new static(
             msgId: $data['msgid'] ?? '',
             createTime: $data['create_time'] ?? 0,
             aibotId: $data['aibotid'] ?? '',

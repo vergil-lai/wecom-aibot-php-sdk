@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 图文混排消息
  */
-class MixedMessage extends BaseMessage
+final class MixedMessage extends BaseMessage
 {
     /** @var array<MixedItem> */
     public array $mixedList = [];
@@ -38,7 +38,7 @@ class MixedMessage extends BaseMessage
         );
     }
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $mixedList = [];
         foreach ($data['mixed'] ?? [] as $item) {
@@ -46,7 +46,7 @@ class MixedMessage extends BaseMessage
         }
         $base = BaseMessage::fromArray($data);
 
-        return new self(
+        return new static(
             msgId: $base->msgId,
             aibotId: $base->aibotId,
             chatType: $base->chatType,

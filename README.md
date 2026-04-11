@@ -378,17 +378,7 @@ readonly class WsFrame
 
 ## 自定义日志
 
-实现 `LoggerInterface` 即可自定义日志输出：
-
-```php
-interface LoggerInterface
-{
-    public function debug(string $message, mixed ...$args): void;
-    public function info(string $message, mixed ...$args): void;
-    public function warn(string $message, mixed ...$args): void;
-    public function error(string $message, mixed ...$args): void;
-}
-```
+实现 `\Psr\Log\LoggerInterface` 即可自定义日志输出：
 
 使用示例：
 
@@ -396,11 +386,8 @@ interface LoggerInterface
 $wsClient = new WSClient(new WsClientOptions(
     botId: 'your-bot-id',
     secret: 'your-bot-secret',
-    logger: new class implements \VergilLai\WecomAiBot\LoggerInterface {
-        public function debug(string $msg, mixed ...$args): void {} // 静默 debug
-        public function info(string $msg, mixed ...$args): void { echo "[INFO] {$msg}\n"; }
-        public function warn(string $msg, mixed ...$args): void { echo "[WARN] {$msg}\n"; }
-        public function error(string $msg, mixed ...$args): void { echo "[ERROR] {$msg}\n"; }
+    logger: new class implements \Psr\Log\LoggerInterface {
+        ...
     },
 ));
 ```

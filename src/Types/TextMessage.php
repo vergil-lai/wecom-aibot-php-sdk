@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 文本消息
  */
-class TextMessage extends BaseMessage
+final class TextMessage extends BaseMessage
 {
     public function __construct(
         string $msgId,
@@ -34,12 +34,12 @@ class TextMessage extends BaseMessage
         );
     }
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $text = TextContent::fromArray($data['text'] ?? []);
         $base = BaseMessage::fromArray($data);
 
-        return new self(
+        return new static(
             msgId: $base->msgId,
             aibotId: $base->aibotId,
             chatType: $base->chatType,

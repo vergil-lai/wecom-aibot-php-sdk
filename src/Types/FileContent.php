@@ -7,16 +7,16 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 文件内容
  */
-class FileContent
+final class FileContent
 {
     public function __construct(
         public string $url,
         public string $aesKey,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
-        return new self(
+        return new static(
             url: $data['url'] ?? '',
             aesKey: $data['aeskey'] ?? '',
         );

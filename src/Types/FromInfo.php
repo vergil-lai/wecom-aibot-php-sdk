@@ -7,16 +7,16 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 发送者信息
  */
-class FromInfo
+final class FromInfo
 {
     public function __construct(
         public string $userId,
         public ?string $corpid = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
-        return new self(
+        return new static(
             userId: $data['userid'] ?? '',
             corpid: $data['corpid'] ?? null,
         );

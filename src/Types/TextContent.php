@@ -7,15 +7,15 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 文本内容
  */
-class TextContent
+final class TextContent
 {
     public function __construct(
         public string $content,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
-        return new self(
+        return new static(
             content: $data['content'] ?? '',
         );
     }

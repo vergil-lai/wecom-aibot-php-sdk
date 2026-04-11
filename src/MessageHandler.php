@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VergilLai\WecomAiBot;
 
 use Evenement\EventEmitterInterface;
+use Psr\Log\LoggerInterface;
 use VergilLai\WecomAiBot\Types\WsFrame;
 use VergilLai\WecomAiBot\Types\WsCmd;
 
@@ -50,7 +51,7 @@ class MessageHandler
         match ($cmd) {
             WsCmd::CALLBACK->value => $this->handleMessageCallback($frame),
             WsCmd::EVENT_CALLBACK->value => $this->handleEventCallback($frame),
-            default => $this->logger->warn("Unknown cmd: {$cmd}"),
+            default => $this->logger->warning("Unknown cmd: {$cmd}"),
         };
     }
 

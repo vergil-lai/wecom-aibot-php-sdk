@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 视频消息
  */
-class VideoMessage extends BaseMessage
+final class VideoMessage extends BaseMessage
 {
     public function __construct(
         string $msgId,
@@ -34,12 +34,12 @@ class VideoMessage extends BaseMessage
         );
     }
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $video = VideoContent::fromArray($data['video'] ?? []);
         $base = BaseMessage::fromArray($data);
 
-        return new self(
+        return new static(
             msgId: $base->msgId,
             aibotId: $base->aibotId,
             chatType: $base->chatType,

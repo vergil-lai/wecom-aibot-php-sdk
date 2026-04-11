@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 事件内容
  */
-class EventContent
+final class EventContent
 {
     public function __construct(
         public EventType $eventType,
@@ -17,12 +17,12 @@ class EventContent
         public ?string $feedbackId = null,
     ) {}
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $eventTypeStr = $data['eventtype'] ?? '';
         $eventType = EventType::tryFrom($eventTypeStr) ?? EventType::EnterChat;
 
-        return new self(
+        return new static(
             eventType: $eventType,
             eventKey: $data['event_key'] ?? null,
             taskId: $data['task_id'] ?? null,

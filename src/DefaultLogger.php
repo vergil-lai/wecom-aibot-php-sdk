@@ -4,35 +4,17 @@ declare(strict_types=1);
 
 namespace VergilLai\WecomAiBot;
 
+use Psr\Log\AbstractLogger;
+
 /**
  * 默认日志实现
  */
-class DefaultLogger implements LoggerInterface
+class DefaultLogger extends AbstractLogger
 {
-    public function debug(string $message, mixed ...$args): void
-    {
-        $this->log('DEBUG', $message, $args);
-    }
-
-    public function info(string $message, mixed ...$args): void
-    {
-        $this->log('INFO', $message, $args);
-    }
-
-    public function warn(string $message, mixed ...$args): void
-    {
-        $this->log('WARN', $message, $args);
-    }
-
-    public function error(string $message, mixed ...$args): void
-    {
-        $this->log('ERROR', $message, $args);
-    }
-
-    private function log(string $level, string $message, array $args): void
+    public function log($level, string|\Stringable $message, array $context = []): void
     {
         $timestamp = date('Y-m-d H:i:s');
-        $formatted = $args ? vsprintf($message, $args) : $message;
+        $formatted = $context ? vsprintf($message, $context) : $message;
         echo "[{$timestamp}] [{$level}] {$formatted}" . PHP_EOL;
     }
 }

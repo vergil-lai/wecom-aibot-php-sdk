@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace VergilLai\WecomAiBot;
 
+use Psr\Log\LoggerInterface;
 use React\EventLoop\Loop;
 use React\EventLoop\TimerInterface;
 use React\Promise\Deferred;
@@ -117,15 +118,14 @@ class WsConnectionManager
         $this->logger->info('Connecting to WebSocket: ' . $wsUrl . '...');
 
         $connector = new WsConnector(Loop::get());
-        $self = $this;
 
         $connector($wsUrl)->then(
-            function (WebSocket $conn) use ($self) {
-                $self->handleConnect($conn);
+            function (WebSocket $conn) {
+                $this->handleConnect($conn);
             },
-            function (\Throwable $e) use ($self) {
-                $self->logger->error('WebSocket connection failed: ' . $e->getMessage());
-                $self->scheduleReconnect();
+            function (\Throwable $e) {
+                $this->logger->error('WebSocket connection failed: ' . $e->getMessage());
+                $this->scheduleReconnect();
             }
         );
     }
@@ -142,25 +142,23 @@ class WsConnectionManager
         $this->logger->info('WebSocket connection established, sending auth...');
         $this->emitConnected();
 
-        $self = $this;
-
-        $conn->on('message', function ($msg) use ($self) {
+        $conn->on('message', function ($msg) {
             $data = (string) $msg;
-            $self->handleMessage($data);
+            $this->handleMessage($data);
         });
 
-        $conn->on('close', function ($code, $reason) use ($self) {
+        $conn->on('close', function ($code, $reason) {
             $reasonStr = $reason ?: "code: {$code}";
-            $self->logger->warn('WebSocket disconnected: ' . $reasonStr);
-            $self->stopHeartbeat();
-            $self->clearPendingMessages('WebSocket connection closed (' . $reasonStr . ')');
-            $self->connection = null;
-            $self->emitDisconnected($reasonStr);
+            $this->logger->warning('WebSocket disconnected: ' . $reasonStr);
+            $this->stopHeartbeat();
+            $this->clearPendingMessages('WebSocket connection closed (' . $reasonStr . ')');
+            $this->connection = null;
+            $this->emitDisconnected($reasonStr);
         });
 
-        $conn->on('error', function (\Throwable $e) use ($self) {
-            $self->logger->error('WebSocket error: ' . $e->getMessage());
-            $self->emitError($e);
+        $conn->on('error', function (\Throwable $e) {
+            $this->logger->error('WebSocket error: ' . $e->getMessage());
+            $this->emitError($e);
         });
 
         $this->sendAuth();
@@ -193,7 +191,7 @@ class WsConnectionManager
     {
         $frame = $this->messageHandler->parseFrame($data);
         if ($frame === null) {
-            $this->logger->warn('Failed to parse message');
+            $this->logger->warning('Failed to parse message');
             return;
         }
 
@@ -213,7 +211,7 @@ class WsConnectionManager
 
             // 检测 disconnected_event
             if (($frame->body['event']['eventtype'] ?? '') === 'disconnected_event') {
-                $this->logger->warn('Received disconnected_event: a new connection has been established');
+                $this->logger->warning('Received disconnected_event: a new connection has been established');
                 $this->stopHeartbeat();
                 $this->clearPendingMessages('Server disconnected due to new connection');
                 $this->isManualClose = true;
@@ -252,7 +250,7 @@ class WsConnectionManager
         // 心跳响应
         if (strpos($reqId, WsCmd::HEARTBEAT->value) === 0) {
             if (($frame->errcode ?? 0) !== 0) {
-                $this->logger->warn('Heartbeat ack error: errcode=' . ($frame->errcode ?? 0));
+                $this->logger->warning('Heartbeat ack error: errcode=' . ($frame->errcode ?? 0));
                 return;
             }
             $this->missedPongCount = 0;
@@ -266,7 +264,7 @@ class WsConnectionManager
         }
 
         // 未知帧
-        $this->logger->warn('Received unknown frame (ignored): ' . json_encode($frame));
+        $this->logger->warning('Received unknown frame (ignored): ' . json_encode($frame));
     }
 
     /**
@@ -301,7 +299,7 @@ class WsConnectionManager
     private function sendHeartbeat(): void
     {
         if ($this->missedPongCount >= self::MAX_MISSED_PONG) {
-            $this->logger->warn('No heartbeat ack received for ' . $this->missedPongCount . ' consecutive pings');
+            $this->logger->warning('No heartbeat ack received for ' . $this->missedPongCount . ' consecutive pings');
             $this->stopHeartbeat();
             if ($this->connection !== null) {
                 $this->connection->close();
@@ -370,13 +368,12 @@ class WsConnectionManager
             $this->emitReconnecting($this->reconnectAttempts);
         }
 
-        $self = $this;
-        $this->reconnectTimer = Loop::addTimer($delay / 1000, function () use ($self) {
-            $self->reconnectTimer = null;
-            if ($self->isManualClose) {
+        $this->reconnectTimer = Loop::addTimer($delay / 1000, function () {
+            $this->reconnectTimer = null;
+            if ($this->isManualClose) {
                 return;
             }
-            $self->connectInternal();
+            $this->connectInternal();
         });
     }
 
@@ -386,7 +383,7 @@ class WsConnectionManager
     private function sendFrame(WsFrame $frame): bool
     {
         if ($this->connection === null) {
-            $this->logger->warn('Cannot send frame: not connected');
+            $this->logger->warning('Cannot send frame: not connected');
             return false;
         }
 
@@ -420,7 +417,7 @@ class WsConnectionManager
         $queue = &$this->replyQueues[$reqId];
 
         if (count($queue) >= $this->maxReplyQueueSize) {
-            $this->logger->warn('Reply queue for reqId ' . $reqId . ' exceeds max size (' . $this->maxReplyQueueSize . ')');
+            $this->logger->warning('Reply queue for reqId ' . $reqId . ' exceeds max size (' . $this->maxReplyQueueSize . ')');
             return \React\Promise\reject(new \RuntimeException('Reply queue for reqId ' . $reqId . ' exceeds max size'));
         }
 
@@ -464,11 +461,13 @@ class WsConnectionManager
 
         $timer = Loop::addTimer($timeout / 1000, function () use ($reqId, $seq, &$deferred, $timeout) {
             $pending = $this->pendingAcks[$reqId] ?? null;
-            if ($pending === null || $pending['seq'] !== $seq) {
+            if ($pending === null || $pending['seq'] !== $seq || ($pending['handled'] ?? false)) {
                 return;
             }
 
-            $this->logger->warn('Reply ack timeout (' . $timeout . 'ms) for reqId: ' . $reqId);
+            $this->pendingAcks[$reqId]['handled'] = true;
+
+            $this->logger->warning('Reply ack timeout (' . $timeout . 'ms) for reqId: ' . $reqId);
             unset($this->pendingAcks[$reqId]);
 
             array_shift($this->replyQueues[$reqId]);
@@ -480,6 +479,7 @@ class WsConnectionManager
             'deferred' => $deferred,
             'timer' => $timer,
             'seq' => $seq,
+            'handled' => false,
         ];
     }
 
@@ -489,9 +489,11 @@ class WsConnectionManager
     private function handleReplyAck(string $reqId, WsFrame $frame): void
     {
         $pending = $this->pendingAcks[$reqId] ?? null;
-        if ($pending === null) {
+        if ($pending === null || ($pending['handled'] ?? false)) {
             return;
         }
+
+        $this->pendingAcks[$reqId]['handled'] = true;
 
         Loop::cancelTimer($pending['timer']);
         unset($this->pendingAcks[$reqId]);
@@ -502,7 +504,7 @@ class WsConnectionManager
         }
 
         if (($frame->errcode ?? 0) !== 0) {
-            $this->logger->warn('Reply ack error: reqId=' . $reqId . ', errcode=' . ($frame->errcode ?? 0) . ', errmsg=' . ($frame->errmsg ?? ''));
+            $this->logger->warning('Reply ack error: reqId=' . $reqId . ', errcode=' . ($frame->errcode ?? 0) . ', errmsg=' . ($frame->errmsg ?? ''));
             $pending['deferred']->reject(new \RuntimeException($frame->errmsg ?? 'Reply failed with errcode ' . $frame->errcode));
         } else {
             $this->logger->debug('Reply ack received for reqId: ' . $reqId);

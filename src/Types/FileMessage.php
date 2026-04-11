@@ -7,7 +7,7 @@ namespace VergilLai\WecomAiBot\Types;
 /**
  * 文件消息
  */
-class FileMessage extends BaseMessage
+final class FileMessage extends BaseMessage
 {
     public function __construct(
         string $msgId,
@@ -34,12 +34,12 @@ class FileMessage extends BaseMessage
         );
     }
 
-    public static function fromArray(array $data): self
+    public static function fromArray(array $data): static
     {
         $file = FileContent::fromArray($data['file'] ?? []);
         $base = BaseMessage::fromArray($data);
 
-        return new self(
+        return new static(
             msgId: $base->msgId,
             aibotId: $base->aibotId,
             chatType: $base->chatType,

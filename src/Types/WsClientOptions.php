@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace VergilLai\WecomAiBot\Types;
 
-use VergilLai\WecomAiBot\LoggerInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * WSClient 配置选项

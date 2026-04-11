@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace VergilLai\WecomAiBot;
 
-use Evenement\EventEmitter;
+use Evenement\EventEmitterInterface;
+use Evenement\EventEmitterTrait;
 use React\Promise\Promise;
 use React\Promise\PromiseInterface;
+use RuntimeException;
+use Psr\Log\LoggerInterface;
 use VergilLai\WecomAiBot\Types\WsClientOptions;
 use VergilLai\WecomAiBot\Types\WsFrame;
 use VergilLai\WecomAiBot\Types\WsCmd;
@@ -18,11 +21,16 @@ use VergilLai\WecomAiBot\Types\WeComMediaType;
 use VergilLai\WecomAiBot\Types\UploadMediaOptions;
 use VergilLai\WecomAiBot\Types\UploadMediaFinishResult;
 
+use function React\Promise\reject;
+use function React\Promise\resolve;
+
 /**
  * 企业微信智能机器人 WebSocket 客户端
  */
-class WSClient extends EventEmitter
+class WSClient implements EventEmitterInterface
 {
+    use EventEmitterTrait;
+
     private LoggerInterface $logger;
     private WsConnectionManager $connectionManager;
     private WeComApiClient $apiClient;
@@ -119,7 +127,7 @@ class WSClient extends EventEmitter
      * @param string $cmd 命令类型
      * @param int $timeout 超时时间（毫秒）
      * @return PromiseInterface<WsFrame>
-     * @throws \RuntimeException
+     * @throws RuntimeException
      */
     private function sendReply(string $reqId, array $body, string $cmd, int $timeout = 10000): PromiseInterface
     {
@@ -137,7 +145,7 @@ class WSClient extends EventEmitter
     public function reply(WsFrame $frame, array $body, ?string $cmd = null): PromiseInterface
     {
         $reqId = $frame->headers->reqId ?? Utils::generateReqId('reply');
-        $cmd = $cmd ?? WsCmd::RESPONSE->value;
+        $cmd ??= WsCmd::RESPONSE->value;
 
         return $this->sendReply($reqId, $body, $cmd);
     }
@@ -277,13 +285,13 @@ class WSClient extends EventEmitter
      * @param TemplateCard $templateCard 模板卡片
      * @param array<string>|null $userIds 要替换的用户 ID 列表
      * @return PromiseInterface<WsFrame>
-     * @throws \RuntimeException
+     * @throws RuntimeException
      */
     public function updateTemplateCard(
         WsFrame $frame,
         TemplateCard $templateCard,
         ?array $userIds = null,
-    ): \React\Promise\PromiseInterface {
+    ): PromiseInterface {
         $body = [
             'response_type' => 'update_template_card',
             'template_card' => $templateCard->toArray(),
@@ -315,6 +323,7 @@ class WSClient extends EventEmitter
     /**
      * 上传临时素材（Promise 链式调用）
      *
+     * @see https://developer.work.weixin.qq.com/document/path/101463#%E4%B8%8A%E4%BC%A0%E4%B8%B4%E6%97%B6%E7%B4%A0%E6%9D%90
      * @param string $filePath 文件路径
      * @param UploadMediaOptions $options 上传选项
      * @return PromiseInterface<UploadMediaFinishResult>
@@ -323,14 +332,14 @@ class WSClient extends EventEmitter
     {
         $fileSize = filesize($filePath);
         if ($fileSize === false) {
-            return \React\Promise\reject(new \RuntimeException('Cannot read file: ' . $filePath));
+            return reject(new RuntimeException('Cannot read file: ' . $filePath));
         }
 
         $chunkSize = 512 * 1024; // 512KB
         $totalChunks = Utils::calculateChunkCount($fileSize, $chunkSize);
 
         if ($totalChunks > 100) {
-            return \React\Promise\reject(new \RuntimeException("File too large: {$totalChunks} chunks exceeds maximum of 100 chunks (max ~50MB)"));
+            return reject(new RuntimeException("File too large: {$totalChunks} chunks exceeds maximum of 100 chunks (max ~50MB)"));
         }
 
         $md5 = md5_file($filePath);
@@ -347,13 +356,13 @@ class WSClient extends EventEmitter
         ], WsCmd::UPLOAD_MEDIA_INIT->value)->then(function (WsFrame $initResult) use ($filePath, $options, $fileSize, $chunkSize, $totalChunks) {
             $uploadId = $initResult->body['upload_id'] ?? null;
             if (!$uploadId) {
-                throw new \RuntimeException('Upload init failed: no upload_id returned');
+                throw new RuntimeException('Upload init failed: no upload_id returned');
             }
             $this->logger->info("Upload init success: upload_id={$uploadId}");
 
             // Step 2: 分片上传 - 递归处理
             return $this->uploadChunksRecursive($filePath, $options, $uploadId, $fileSize, $chunkSize, $totalChunks, 0);
-        })->then(function ($uploadId) use ($options) {
+        })->then(function ($uploadId) {
             // Step 3: 完成上传
             $finishReqId = Utils::generateReqId('upload_finish');
             return $this->sendReplyAsync($finishReqId, [
@@ -362,7 +371,7 @@ class WSClient extends EventEmitter
         })->then(function (WsFrame $finishResult) use ($options) {
             $mediaId = $finishResult->body['media_id'] ?? null;
             if (!$mediaId) {
-                throw new \RuntimeException('Upload finish failed: no media_id returned');
+                throw new RuntimeException('Upload finish failed: no media_id returned');
             }
             $this->logger->info("Upload complete: media_id={$mediaId}, type={$finishResult->body['type']}");
             return new UploadMediaFinishResult(
@@ -387,7 +396,7 @@ class WSClient extends EventEmitter
     ): PromiseInterface {
         if ($currentChunk >= $totalChunks) {
             $this->logger->info("All {$totalChunks} chunks uploaded, finishing...");
-            return \React\Promise\resolve($uploadId);
+            return resolve($uploadId);
         }
 
         $start = $currentChunk * $chunkSize;
@@ -399,7 +408,7 @@ class WSClient extends EventEmitter
         fclose($handle);
 
         if ($chunk === false) {
-            return \React\Promise\reject(new \RuntimeException('Failed to read chunk ' . $currentChunk));
+            return reject(new RuntimeException('Failed to read chunk ' . $currentChunk));
         }
 
         $base64Data = base64_encode($chunk);
@@ -435,7 +444,7 @@ class WSClient extends EventEmitter
             ->then(function (WsFrame $response) {
                 // 错误码检查
                 if ($response->errcode !== 0 && $response->errcode !== null) {
-                    throw new \RuntimeException($response->errmsg ?? 'Request failed with errcode ' . $response->errcode);
+                    throw new RuntimeException($response->errmsg ?? 'Request failed with errcode ' . $response->errcode);
                 }
                 return $response;
             });
@@ -448,8 +457,8 @@ class WSClient extends EventEmitter
      * @param WeComMediaType $mediaType 媒体类型
      * @param string $mediaId 媒体 ID
      * @param array|null $videoOptions 视频选项
-     * @return WsFrame
-     * @throws \RuntimeException
+     * @return PromiseInterface
+     * @throws RuntimeException
      */
     public function replyMedia(
         WsFrame $frame,
@@ -502,7 +511,7 @@ class WSClient extends EventEmitter
      * @param string $url 下载地址
      * @param string|null $aesKey 解密密钥（可选，不传则返回原始数据）
      * @return DownloadFileResult
-     * @throws \RuntimeException
+     * @throws RuntimeException
      */
     public function downloadFile(string $url, ?string $aesKey = null): DownloadFileResult
     {
