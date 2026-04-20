@@ -117,12 +117,20 @@ class WeComApiClient
 
     /**
      * 从 Content-Disposition 头提取文件名
+     * 优先匹配 filename*=UTF-8''xxx 格式（RFC 5987），其次匹配 filename="xxx" 或 filename=xxx 格式
      */
     private function extractFilename(string $contentDisposition): ?string
     {
-        if (preg_match('/filename[^;=\n]*=((["\'])?([^\"\']*)\2)/i', $contentDisposition, $matches)) {
-            return $matches[3];
+        // 优先匹配 filename*=UTF-8''xxx 格式（RFC 5987）
+        if (preg_match("/filename\*=UTF-8''([^;\s]+)/i", $contentDisposition, $matches)) {
+            return rawurldecode($matches[1]);
         }
+
+        // 匹配 filename="xxx" 或 filename=xxx 格式
+        if (preg_match('/filename="?([^";\s]+)"?/i', $contentDisposition, $matches)) {
+            return rawurldecode($matches[1]);
+        }
+
         return null;
     }
 
