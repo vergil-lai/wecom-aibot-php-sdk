@@ -58,7 +58,7 @@ class WsConnectionManager
     private int $pendingAckSeq = 0;
 
     /** 回执超时时间（毫秒） */
-    private int $replyAckTimeout = 5000;
+    private int $replyAckTimeout;
 
     /** 单个 reqId 队列最大长度 */
     private int $maxReplyQueueSize;
@@ -74,6 +74,7 @@ class WsConnectionManager
         $this->options = $options;
         $this->logger = $logger;
         $this->maxReplyQueueSize = $options->maxReplyQueueSize;
+        $this->replyAckTimeout = $options->replyAckTimeout;
     }
 
     /**
@@ -635,5 +636,18 @@ class WsConnectionManager
     public function isRunning(): bool
     {
         return $this->isRunning;
+    }
+
+    /**
+     * 检查指定 reqId 是否有待回执的消息（即上一条消息还未收到 ack）
+     *
+     * 用于流式场景：调用方可据此决定是否跳过当前帧，避免排队积压。
+     *
+     * @param string $reqId 要检查的 req_id
+     * @return bool true 表示有消息正在等待 ack
+     */
+    public function hasPendingAck(string $reqId): bool
+    {
+        return isset($this->pendingAcks[$reqId]);
     }
 }

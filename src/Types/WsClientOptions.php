@@ -21,6 +21,7 @@ readonly class WsClientOptions
         public int $maxAuthFailureAttempts = 5,
         public int $heartbeatInterval = 30000,
         public int $requestTimeout = 10000,
+        public int $replyAckTimeout = 5000,
         public string $wsUrl = 'wss://openws.work.weixin.qq.com',
         public int $maxReplyQueueSize = 500,
         public ?LoggerInterface $logger = null,

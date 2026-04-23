@@ -35,6 +35,7 @@ class WSClient implements EventEmitterInterface
     private WsConnectionManager $connectionManager;
     private WeComApiClient $apiClient;
     private MessageHandler $messageHandler;
+    private WsClientOptions $options;
 
     public function __construct(WsClientOptions|array $options)
     {
@@ -42,6 +43,7 @@ class WSClient implements EventEmitterInterface
             $options = new WsClientOptions(...$options);
         }
 
+        $this->options = $options;
         $this->logger = $options->logger ?? new DefaultLogger();
         $this->apiClient = new WeComApiClient($options->requestTimeout);
         $this->messageHandler = new MessageHandler($this, $this->logger);
@@ -438,8 +440,11 @@ class WSClient implements EventEmitterInterface
      * @param int $timeout 超时时间（毫秒）
      * @return PromiseInterface<WsFrame>
      */
-    private function sendReplyAsync(string $reqId, array $body, string $cmd, int $timeout = 10000): PromiseInterface
+    private function sendReplyAsync(string $reqId, array $body, string $cmd, int $timeout = 0): PromiseInterface
     {
+        if ($timeout === 0) {
+            $timeout = $this->options->replyAckTimeout;
+        }
         return $this->connectionManager->sendReply($reqId, $body, $cmd, $timeout)
             ->then(function (WsFrame $response) {
                 // 错误码检查
@@ -548,6 +553,51 @@ class WSClient implements EventEmitterInterface
     public function getConnectionManager(): WsConnectionManager
     {
         return $this->connectionManager;
+    }
+
+    /**
+     * 检查指定消息帧是否有未完成的 ack（即上一条消息还未收到回执）
+     *
+     * 用于流式场景：调用方可据此决定是否跳过当前中间帧，避免排队积压。
+     *
+     * @param WsFrame $frame 收到的原始 WebSocket 帧
+     * @return bool true 表示有消息正在等待 ack
+     */
+    public function hasPendingReplyAck(WsFrame $frame): bool
+    {
+        $reqId = $frame->headers->reqId ?? '';
+        return $this->connectionManager->hasPendingAck($reqId);
+    }
+
+    /**
+     * 非阻塞流式文本回复
+     *
+     * 如果上一条同 reqId 的消息尚未收到 ack，则跳过本次发送（返回 'skipped'），
+     * 避免流式中间帧排队积压导致延迟。
+     *
+     * 注意：finish=true 的最终帧不受此限制，始终保证发送（走正常队列）。
+     *
+     * @param WsFrame $frame 收到的原始 WebSocket 帧
+     * @param string $streamId 流式消息 ID
+     * @param string $content 回复内容
+     * @param bool $finish 是否结束流式消息
+     * @param array<ReplyMsgItem>|null $msgItem 图文混排项（仅在 finish=true 时有效），用于在结束时附带图片内容
+     * @param ReplyFeedback|null $feedback 反馈信息（仅在首次回复时设置）
+     * @return PromiseInterface<WsFrame|string> 正常发送时返回回执帧，跳过时返回 'skipped'
+     */
+    public function replyStreamNonBlocking(
+        WsFrame $frame,
+        string $streamId,
+        string $content,
+        bool $finish = false,
+        ?array $msgItem = null,
+        ?ReplyFeedback $feedback = null,
+    ): PromiseInterface {
+        // finish=true 的最终帧必须发送，不做跳过判断
+        if (!$finish && $this->hasPendingReplyAck($frame)) {
+            return resolve('skipped');
+        }
+        return $this->replyStream($frame, $streamId, $content, $finish, $msgItem, $feedback);
     }
 
     /**
