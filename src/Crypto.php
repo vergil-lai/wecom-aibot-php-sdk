@@ -27,10 +27,7 @@ class Crypto
         }
 
         // 将 Base64 编码的 aesKey 解码为二进制
-        $key = base64_decode($aesKey, true);
-        if ($key === false) {
-            throw new \InvalidArgumentException('decryptFile: aesKey is not valid base64');
-        }
+        $key = self::decodeAesKey($aesKey);
 
         // IV 取 aesKey 解码后的前 16 字节
         $iv = substr($key, 0, 16);
@@ -41,7 +38,7 @@ class Crypto
                 $encryptedBuffer,
                 'AES-256-CBC',
                 $key,
-                OPENSSL_RAW_DATA,  // 不自动去除 padding
+                OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING,  // 不自动去除 padding
                 $iv
             );
 
@@ -54,6 +51,29 @@ class Crypto
         } catch (\Throwable $e) {
             throw new \RuntimeException('decryptFile: Decryption failed - ' . $e->getMessage());
         }
+    }
+
+    /**
+     * @param string $aesKey Base64 或 Base64 URL-safe 编码的 AES-256 密钥
+     */
+    private static function decodeAesKey(string $aesKey): string
+    {
+        $normalized = strtr($aesKey, '-_', '+/');
+        $padding = strlen($normalized) % 4;
+        if ($padding > 0) {
+            $normalized .= str_repeat('=', 4 - $padding);
+        }
+
+        $key = base64_decode($normalized, true);
+        if ($key === false) {
+            throw new \InvalidArgumentException('decryptFile: aesKey is not valid base64');
+        }
+
+        if (strlen($key) !== 32) {
+            throw new \InvalidArgumentException('decryptFile: aesKey must decode to 32 bytes');
+        }
+
+        return $key;
     }
 
     /**

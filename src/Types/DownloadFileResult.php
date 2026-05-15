@@ -12,5 +12,6 @@ readonly class DownloadFileResult
     public function __construct(
         public string $buffer,
         public ?string $filename = null,
+        public bool $decrypted = false,
     ) {}
 }

@@ -35,6 +35,7 @@ class WeComApiClient
         return $this->httpClient->get($url)->then(
             function (ResponseInterface $response) use ($aesKey) {
                 $contentDisposition = $response->getHeaderLine('Content-Disposition');
+                $contentType = $response->getHeaderLine('Content-Type');
                 $body = (string) $response->getBody();
 
                 // 提取文件名
@@ -48,21 +49,29 @@ class WeComApiClient
                     return new DownloadFileResult(
                         buffer: $body,
                         filename: $filename,
+                        decrypted: false,
                     );
                 }
 
-                // 解密（如果失败则可能是 COS 预签名 URL 返回的原始明文，回退到原始数据）
+                // 解密；如果 COS 预签名 URL 已返回明文，只在能识别为真实文件时回退。
                 try {
                     $decrypted = Crypto::decryptFile($body, $aesKey);
-                    $buffer = $decrypted;
+                    return new DownloadFileResult(
+                        buffer: $decrypted,
+                        filename: $filename,
+                        decrypted: true,
+                    );
                 } catch (\RuntimeException $e) {
-                    $buffer = $body;
-                }
+                    if ($this->isProbablyPlainFile($body, $filename, $contentType)) {
+                        return new DownloadFileResult(
+                            buffer: $body,
+                            filename: $filename,
+                            decrypted: false,
+                        );
+                    }
 
-                return new DownloadFileResult(
-                    buffer: $buffer,
-                    filename: $filename,
-                );
+                    throw $e;
+                }
             }
         );
     }
@@ -127,5 +136,50 @@ class WeComApiClient
         }
 
         return null;
+    }
+
+    private function isProbablyPlainFile(string $body, ?string $filename, string $contentType): bool
+    {
+        if ($body === '') {
+            return false;
+        }
+
+        $extension = strtolower((string) pathinfo((string) $filename, PATHINFO_EXTENSION));
+        $header = substr($body, 0, 16);
+
+        if (str_starts_with($header, "PK\x03\x04")) {
+            return in_array($extension, ['docx', 'pptx', 'xlsx', 'zip'], true);
+        }
+
+        if (str_starts_with($header, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) {
+            return in_array($extension, ['doc', 'ppt', 'xls'], true);
+        }
+
+        if (str_starts_with($header, '%PDF-')) {
+            return $extension === 'pdf';
+        }
+
+        if (str_starts_with($header, "\x89PNG\r\n\x1A\n")) {
+            return $extension === 'png';
+        }
+
+        if (str_starts_with($header, "\xFF\xD8\xFF")) {
+            return in_array($extension, ['jpg', 'jpeg'], true);
+        }
+
+        if (str_starts_with($header, 'GIF87a') || str_starts_with($header, 'GIF89a')) {
+            return $extension === 'gif';
+        }
+
+        if (str_starts_with($header, 'RIFF') && substr($body, 8, 4) === 'WEBP') {
+            return $extension === 'webp';
+        }
+
+        if (in_array($extension, ['csv', 'txt', 'md', 'json'], true)) {
+            return ! str_contains(substr($body, 0, 4096), "\x00");
+        }
+
+        return str_starts_with(strtolower($contentType), 'text/')
+            && ! str_contains(substr($body, 0, 4096), "\x00");
     }
 }
