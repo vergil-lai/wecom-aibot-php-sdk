@@ -51,15 +51,6 @@ class WeComApiClient
                     );
                 }
 
-                // 如果提供的 aesKey，但内容不是有效 base64（COS 预签名 URL 直接返回原始二进制），
-                // 跳过解密，直接返回原始数据
-                if (!self::isValidBase64($body)) {
-                    return new DownloadFileResult(
-                        buffer: $body,
-                        filename: $filename,
-                    );
-                }
-
                 // 解密
                 $decrypted = Crypto::decryptFile($body, $aesKey);
 
@@ -134,14 +125,4 @@ class WeComApiClient
         return null;
     }
 
-    /**
-     * 检测字符串是否为有效的 Base64 编码
-     */
-    private static function isValidBase64(string $data): bool
-    {
-        if ($data === '' || strlen($data) % 4 !== 0) {
-            return false;
-        }
-        return preg_match('/^[A-Za-z0-9+\/]+=*$/', $data) === 1;
-    }
 }

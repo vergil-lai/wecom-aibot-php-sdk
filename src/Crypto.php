@@ -12,14 +12,14 @@ class Crypto
     /**
      * 解密文件内容
      *
-     * @param string $encryptedData 加密后的数据
+     * @param string $encryptedBuffer 加密后的原始二进制数据
      * @param string $aesKey Base64 编码的 AES-256 密钥
      * @return string 解密后的原始数据
      */
-    public static function decryptFile(string $encryptedData, string $aesKey): string
+    public static function decryptFile(string $encryptedBuffer, string $aesKey): string
     {
-        if ($encryptedData === '') {
-            throw new \InvalidArgumentException('decryptFile: encryptedData is empty or not provided');
+        if ($encryptedBuffer === '') {
+            throw new \InvalidArgumentException('decryptFile: encryptedBuffer is empty or not provided');
         }
 
         if ($aesKey === '') {
@@ -34,12 +34,6 @@ class Crypto
 
         // IV 取 aesKey 解码后的前 16 字节
         $iv = substr($key, 0, 16);
-
-        // 将加密数据从 Base64 解码
-        $encryptedBuffer = base64_decode($encryptedData, true);
-        if ($encryptedBuffer === false) {
-            throw new \InvalidArgumentException('decryptFile: encryptedData is not valid base64');
-        }
 
         try {
             // 使用 aes-256-cbc 解密，关闭自动 padding
