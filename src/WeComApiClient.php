@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace VergilLai\WecomAiBot;
 
+use Psr\Http\Message\ResponseInterface;
 use React\EventLoop\Loop;
 use React\Http\Browser;
 use React\Promise\PromiseInterface;
-use Psr\Http\Message\ResponseInterface;
 use VergilLai\WecomAiBot\Types\DownloadFileResult;
 
 /**
@@ -26,8 +26,8 @@ class WeComApiClient
     /**
      * 下载并解密文件（异步）
      *
-     * @param string $url 下载地址
-     * @param string|null $aesKey 解密密钥（可选，不传则返回原始数据）
+     * @param  string  $url  下载地址
+     * @param  string|null  $aesKey  解密密钥（可选，不传则返回原始数据）
      * @return PromiseInterface<DownloadFileResult>
      */
     public function downloadFileAsync(string $url, ?string $aesKey = null): PromiseInterface
@@ -51,11 +51,16 @@ class WeComApiClient
                     );
                 }
 
-                // 解密
-                $decrypted = Crypto::decryptFile($body, $aesKey);
+                // 解密（如果失败则可能是 COS 预签名 URL 返回的原始明文，回退到原始数据）
+                try {
+                    $decrypted = Crypto::decryptFile($body, $aesKey);
+                    $buffer = $decrypted;
+                } catch (\RuntimeException $e) {
+                    $buffer = $body;
+                }
 
                 return new DownloadFileResult(
-                    buffer: $decrypted,
+                    buffer: $buffer,
                     filename: $filename,
                 );
             }
@@ -65,9 +70,8 @@ class WeComApiClient
     /**
      * 下载并解密文件（同步版本，内部使用）
      *
-     * @param string $url 下载地址
-     * @param string|null $aesKey 解密密钥（可选）
-     * @return DownloadFileResult
+     * @param  string  $url  下载地址
+     * @param  string|null  $aesKey  解密密钥（可选）
      */
     public function downloadFile(string $url, ?string $aesKey = null): DownloadFileResult
     {
@@ -124,5 +128,4 @@ class WeComApiClient
 
         return null;
     }
-
 }
