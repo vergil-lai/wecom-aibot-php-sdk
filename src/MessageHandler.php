@@ -8,20 +8,18 @@ use Evenement\EventEmitterInterface;
 use Psr\Log\LoggerInterface;
 use VergilLai\WecomAiBot\Types\WsFrame;
 use VergilLai\WecomAiBot\Types\WsCmd;
+use VergilLai\WecomAiBot\Types\MessageType;
 
 /**
- * 消息解析与事件分发
+ * 消息处理器
+ * 负责解析 WebSocket 帧并分发为具体的消息事件和事件回调
  */
 class MessageHandler
 {
-    private EventEmitterInterface $emitter;
     private LoggerInterface $logger;
 
-    public function __construct(
-        EventEmitterInterface $emitter,
-        LoggerInterface $logger,
-    ) {
-        $this->emitter = $emitter;
+    public function __construct(LoggerInterface $logger)
+    {
         $this->logger = $logger;
     }
 
@@ -40,61 +38,74 @@ class MessageHandler
     }
 
     /**
-     * 分发帧到对应事件
+     * 处理收到的 WebSocket 帧，解析并触发对应的消息/事件
+     *
+     * @param WsFrame $frame WebSocket 接收帧
+     * @param EventEmitterInterface $emitter 用于触发事件的 emitter
      */
-    public function dispatch(WsFrame $frame): void
+    public function handleFrame(WsFrame $frame, EventEmitterInterface $emitter): void
     {
-        $cmd = $frame->cmd ?? '';
+        try {
+            $body = $frame->body;
 
-        $this->logger->debug("Dispatching cmd: {$cmd}");
+            if ($body === null || !isset($body['msgtype'])) {
+                $this->logger->warning('Received invalid message format: ' . json_encode($frame));
+                return;
+            }
 
-        match ($cmd) {
-            WsCmd::CALLBACK->value => $this->handleMessageCallback($frame),
-            WsCmd::EVENT_CALLBACK->value => $this->handleEventCallback($frame),
-            default => $this->logger->warning("Unknown cmd: {$cmd}"),
+            // 事件推送回调处理
+            if ($frame->cmd === WsCmd::EVENT_CALLBACK->value) {
+                $this->handleEventCallback($frame, $emitter);
+                return;
+            }
+
+            // 消息推送回调处理
+            $this->handleMessageCallback($frame, $emitter);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to handle message: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 处理消息推送回调 (aibot_msg_callback)
+     */
+    private function handleMessageCallback(WsFrame $frame, EventEmitterInterface $emitter): void
+    {
+        $body = $frame->body;
+        $msgType = $body['msgtype'] ?? '';
+
+        // 触发通用 message 事件
+        $emitter->emit('message', [$frame]);
+
+        // 根据 body 中的消息类型触发特定事件
+        match ($msgType) {
+            MessageType::Text->value => $emitter->emit('message.text', [$frame]),
+            MessageType::Image->value => $emitter->emit('message.image', [$frame]),
+            MessageType::Mixed->value => $emitter->emit('message.mixed', [$frame]),
+            MessageType::Voice->value => $emitter->emit('message.voice', [$frame]),
+            MessageType::File->value => $emitter->emit('message.file', [$frame]),
+            MessageType::Video->value => $emitter->emit('message.video', [$frame]),
+            default => $this->logger->debug("Received unhandled message type: {$msgType}"),
         };
     }
 
     /**
-     * 处理消息回调
+     * 处理事件推送回调 (aibot_event_callback)
      */
-    private function handleMessageCallback(WsFrame $frame): void
+    private function handleEventCallback(WsFrame $frame, EventEmitterInterface $emitter): void
     {
         $body = $frame->body;
-        if ($body === null) {
-            return;
-        }
-
-        $msgType = $body['msgtype'] ?? 'unknown';
-
-        // 触发通用 message 事件
-        $this->emitter->emit('message', [$frame]);
-
-        // 触发具体类型的消息事件
-        $this->emitter->emit('message.' . $msgType, [$frame]);
-
-        $this->logger->debug("Message type: {$msgType}");
-    }
-
-    /**
-     * 处理事件回调
-     */
-    private function handleEventCallback(WsFrame $frame): void
-    {
-        $body = $frame->body;
-        if ($body === null) {
-            return;
-        }
-
         $eventData = $body['event'] ?? [];
-        $eventType = $eventData['eventtype'] ?? 'unknown';
+        $eventType = $eventData['eventtype'] ?? null;
 
         // 触发通用 event 事件
-        $this->emitter->emit('event', [$frame]);
+        $emitter->emit('event', [$frame]);
 
-        // 触发具体类型的事件
-        $this->emitter->emit('event.' . $eventType, [$frame]);
-
-        $this->logger->debug("Event type: {$eventType}");
+        // 根据事件类型触发特定事件
+        if ($eventType !== null) {
+            $emitter->emit('event.' . $eventType, [$frame]);
+        } else {
+            $this->logger->debug('Received event callback without eventtype: ' . json_encode($body));
+        }
     }
 }

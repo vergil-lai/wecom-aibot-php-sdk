@@ -6,6 +6,7 @@ namespace VergilLai\WecomAiBot;
 
 use Evenement\EventEmitterInterface;
 use Evenement\EventEmitterTrait;
+use React\EventLoop\Loop;
 use React\Promise\Promise;
 use React\Promise\PromiseInterface;
 use RuntimeException;
@@ -46,7 +47,7 @@ class WSClient implements EventEmitterInterface
         $this->options = $options;
         $this->logger = $options->logger ?? new DefaultLogger();
         $this->apiClient = new WeComApiClient($options->requestTimeout);
-        $this->messageHandler = new MessageHandler($this, $this->logger);
+        $this->messageHandler = new MessageHandler($this->logger);
         $this->connectionManager = new WsConnectionManager(
             $options,
             $this->logger,
@@ -81,7 +82,7 @@ class WSClient implements EventEmitterInterface
             $this->emit('error', [$error]);
         };
         $this->connectionManager->onMessage = function (WsFrame $frame) {
-            $this->messageHandler->dispatch($frame);
+            $this->messageHandler->handleFrame($frame, $this);
         };
     }
 
@@ -355,15 +356,15 @@ class WSClient implements EventEmitterInterface
             'total_size' => $fileSize,
             'total_chunks' => $totalChunks,
             'md5' => $md5,
-        ], WsCmd::UPLOAD_MEDIA_INIT->value)->then(function (WsFrame $initResult) use ($filePath, $options, $fileSize, $chunkSize, $totalChunks) {
+        ], WsCmd::UPLOAD_MEDIA_INIT->value)->then(function (WsFrame $initResult) use ($filePath, $fileSize, $chunkSize, $totalChunks) {
             $uploadId = $initResult->body['upload_id'] ?? null;
             if (!$uploadId) {
                 throw new RuntimeException('Upload init failed: no upload_id returned');
             }
             $this->logger->info("Upload init success: upload_id={$uploadId}");
 
-            // Step 2: 分片上传 - 递归处理
-            return $this->uploadChunksRecursive($filePath, $options, $uploadId, $fileSize, $chunkSize, $totalChunks, 0);
+            // Step 2: 并发分片上传（带重试）
+            return $this->uploadChunksConcurrent($filePath, $uploadId, $fileSize, $chunkSize, $totalChunks);
         })->then(function ($uploadId) {
             // Step 3: 完成上传
             $finishReqId = Utils::generateReqId('upload_finish');
@@ -385,23 +386,99 @@ class WSClient implements EventEmitterInterface
     }
 
     /**
-     * 递归上传分片
+     * 并发分片上传（worker pool 模式）
+     *
+     * 动态计算并发数：
+     * - 1~4 分片（≤2MB）：全部并发
+     * - 5~10 分片（2~5MB）：并发 3
+     * - >10 分片（>5MB）：并发 2（企微后端对大量并发 chunk 会返回 system error）
      */
-    private function uploadChunksRecursive(
+    private function uploadChunksConcurrent(
         string $filePath,
-        UploadMediaOptions $options,
+        string $uploadId,
+        int $fileSize,
+        int $chunkSize,
+        int $totalChunks
+    ): PromiseInterface {
+        if ($totalChunks <= 1) {
+            return $this->uploadChunkWithRetry($filePath, $uploadId, 0, $fileSize, $chunkSize, $totalChunks)
+                ->then(function () use ($uploadId) {
+                    return $uploadId;
+                });
+        }
+
+        $maxConcurrency = $totalChunks <= 4 ? $totalChunks : ($totalChunks <= 10 ? 3 : 2);
+        $this->logger->debug("Upload concurrency: {$maxConcurrency} workers for {$totalChunks} chunks");
+
+        $nextIndex = 0;
+        $errors = [];
+
+        $workerPromises = [];
+        for ($i = 0; $i < $maxConcurrency; $i++) {
+            $workerPromises[] = $this->createUploadWorker($filePath, $uploadId, $fileSize, $chunkSize, $totalChunks, $nextIndex, $errors);
+        }
+
+        return \React\Promise\all($workerPromises)->then(function () use ($uploadId, &$errors, $totalChunks) {
+            if (!empty($errors)) {
+                $firstError = $errors[0];
+                throw new RuntimeException(
+                    'Upload failed: ' . count($errors) . ' chunk(s) failed. First error: ' . $firstError->getMessage()
+                );
+            }
+            $this->logger->info("All {$totalChunks} chunks uploaded, finishing...");
+            return $uploadId;
+        });
+    }
+
+    /**
+     * 创建上传 worker，从共享索引池中取 chunk 上传
+     */
+    private function createUploadWorker(
+        string $filePath,
         string $uploadId,
         int $fileSize,
         int $chunkSize,
         int $totalChunks,
-        int $currentChunk
+        int &$nextIndex,
+        array &$errors
     ): PromiseInterface {
-        if ($currentChunk >= $totalChunks) {
-            $this->logger->info("All {$totalChunks} chunks uploaded, finishing...");
-            return resolve($uploadId);
-        }
+        return new Promise(function ($resolve) use ($filePath, $uploadId, $fileSize, $chunkSize, $totalChunks, &$nextIndex, &$errors) {
+            $processNext = function () use (&$processNext, $resolve, $filePath, $uploadId, $fileSize, $chunkSize, $totalChunks, &$nextIndex, &$errors) {
+                if ($nextIndex >= $totalChunks) {
+                    $resolve(null);
+                    return;
+                }
 
-        $start = $currentChunk * $chunkSize;
+                $idx = $nextIndex++;
+
+                $this->uploadChunkWithRetry($filePath, $uploadId, $idx, $fileSize, $chunkSize, $totalChunks)
+                    ->then(function () use ($processNext) {
+                        $processNext();
+                    }, function (\Throwable $e) use (&$errors, $processNext) {
+                        $errors[] = $e;
+                        $processNext();
+                    });
+            };
+
+            $processNext();
+        });
+    }
+
+    /**
+     * 上传单个分片（带重试）
+     *
+     * 单分片最大重试次数：2
+     */
+    private function uploadChunkWithRetry(
+        string $filePath,
+        string $uploadId,
+        int $chunkIndex,
+        int $fileSize,
+        int $chunkSize,
+        int $totalChunks,
+        int $attempt = 0
+    ): PromiseInterface {
+        $start = $chunkIndex * $chunkSize;
         $end = min($start + $chunkSize, $fileSize);
 
         $handle = fopen($filePath, 'rb');
@@ -410,7 +487,7 @@ class WSClient implements EventEmitterInterface
         fclose($handle);
 
         if ($chunk === false) {
-            return reject(new RuntimeException('Failed to read chunk ' . $currentChunk));
+            return reject(new RuntimeException('Failed to read chunk ' . $chunkIndex));
         }
 
         $base64Data = base64_encode($chunk);
@@ -418,17 +495,39 @@ class WSClient implements EventEmitterInterface
 
         return $this->sendReplyAsync($chunkReqId, [
             'upload_id' => $uploadId,
-            'chunk_index' => $currentChunk,
+            'chunk_index' => $chunkIndex,
             'base64_data' => $base64Data,
-        ], WsCmd::UPLOAD_MEDIA_CHUNK->value)->then(function () use ($filePath, $options, $uploadId, $fileSize, $chunkSize, $totalChunks, $currentChunk) {
-            $this->logger->debug("Uploaded chunk " . ($currentChunk + 1) . "/{$totalChunks}");
-            $this->emit('uploadProgress', [
-                'chunkIndex' => $currentChunk,
-                'totalChunks' => $totalChunks,
-                'uploadId' => $uploadId,
-            ]);
-            return $this->uploadChunksRecursive($filePath, $options, $uploadId, $fileSize, $chunkSize, $totalChunks, $currentChunk + 1);
-        });
+        ], WsCmd::UPLOAD_MEDIA_CHUNK->value)->then(
+            function () use ($chunkIndex, $totalChunks, $uploadId) {
+                $this->logger->debug("Uploaded chunk " . ($chunkIndex + 1) . "/{$totalChunks}");
+                $this->emit('uploadProgress', [
+                    'chunkIndex' => $chunkIndex,
+                    'totalChunks' => $totalChunks,
+                    'uploadId' => $uploadId,
+                ]);
+            },
+            function (\Throwable $e) use ($filePath, $uploadId, $chunkIndex, $fileSize, $chunkSize, $totalChunks, $attempt) {
+                $maxRetries = 2;
+                if ($attempt < $maxRetries) {
+                    $delay = 500 * ($attempt + 1);
+                    $this->logger->warning(
+                        "Chunk {$chunkIndex} upload failed (attempt " . ($attempt + 1) . "/" . ($maxRetries + 1) . "), " .
+                        "retrying in {$delay}ms... error: " . $e->getMessage()
+                    );
+
+                    return new Promise(function ($resolve, $reject) use ($delay, $filePath, $uploadId, $chunkIndex, $fileSize, $chunkSize, $totalChunks, $attempt) {
+                        Loop::addTimer($delay / 1000, function () use ($resolve, $reject, $filePath, $uploadId, $chunkIndex, $fileSize, $chunkSize, $totalChunks, $attempt) {
+                            $this->uploadChunkWithRetry($filePath, $uploadId, $chunkIndex, $fileSize, $chunkSize, $totalChunks, $attempt + 1)
+                                ->then($resolve, $reject);
+                        });
+                    });
+                }
+
+                return reject(new RuntimeException(
+                    "Chunk {$chunkIndex} upload failed after " . ($maxRetries + 1) . " attempts: " . $e->getMessage()
+                ));
+            }
+        );
     }
 
     /**

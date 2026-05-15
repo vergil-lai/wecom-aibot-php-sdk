@@ -11,10 +11,18 @@ use Psr\Log\AbstractLogger;
  */
 class DefaultLogger extends AbstractLogger
 {
+    private string $prefix;
+
+    public function __construct(string $prefix = 'AiBotSDK')
+    {
+        $this->prefix = $prefix;
+    }
+
     public function log($level, string|\Stringable $message, array $context = []): void
     {
         $timestamp = date('Y-m-d H:i:s');
         $formatted = $context ? vsprintf($message, $context) : $message;
-        echo "[{$timestamp}] [{$level}] {$formatted}" . PHP_EOL;
+        $levelUpper = strtoupper((string) $level);
+        echo "[{$timestamp}] [{$this->prefix}] [{$levelUpper}] {$formatted}" . PHP_EOL;
     }
 }
